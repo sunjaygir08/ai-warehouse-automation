@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Live Simulation - Smart Warehouse</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}"/>
+</head>
+<body class="simulation-page">
+<nav class="navbar">
+  <a class="nav-logo" href="/">⬡ SMART<span>WH</span></a>
+  <ul class="nav-links">
+    <li><a href="/">Home</a></li><li><a href="/dashboard">Dashboard</a></li>
+    <li><a href="/simulation" class="active">Simulation</a></li>
+    <li><a href="/about">About</a></li><li><a href="/contact">Contact</a></li>
+  </ul>
+  <button class="hamburger"><span></span><span></span><span></span></button>
+</nav>
+
+<main class="simulation-shell">
+  <header class="simulation-topbar">
+    <div>
+      <div class="section-label">Smart Warehouse / Operations <span class="badge-proto">3D PROTOTYPE V1.0</span></div>
+      <h1>Smart Warehouse Simulation</h1>
+    </div>
+    <div class="simulation-status"><span id="sim-status-dot"></span>
+      <span id="sim-status">PAUSED</span><span class="tick-label">TICK <b id="sim-tick">0</b></span></div>
+  </header>
+  <div class="simulation-toolbar">
+    <button class="btn btn-primary" id="sim-start">▶ Start</button>
+    <button class="btn btn-outline" id="sim-pause">⏸ Pause</button>
+    <button class="btn btn-outline" id="sim-reset">↺ Reset</button>
+    <button class="btn btn-outline" id="sim-order">＋ Add Order</button>
+    <label class="sim-select">SPEED <select id="sim-speed"><option value="1">1×</option><option value="2">2×</option><option value="3">3×</option><option value="5">5×</option></select></label>
+    <button class="btn btn-outline" id="sim-camera">⌖ Reset Camera</button>
+    <button class="btn btn-outline" id="sim-topview">☵ Top View</button>
+    <label class="toggle"><input id="sim-paths" type="checkbox" checked/><span></span> Paths</label>
+    <label class="toggle"><input id="sim-grid" type="checkbox" checked/><span></span> Grid</label>
+  </div>
+  <div class="simulation-layout">
+    <section class="warehouse-viewport">
+      <div id="warehouse-scene" aria-label="Interactive 3D warehouse"></div>
+      <div class="scene-help">DRAG ROTATE · SCROLL ZOOM · SHIFT + DRAG PAN · CLICK ROBOT OR RACK TO INSPECT</div>
+      <div class="scene-error" id="scene-error" hidden>
+        <div class="error-dialog">
+          <h3 style="color:#ff8a7a; margin-bottom:0.5rem; font-size:1.1rem;">WebGL Notice</h3>
+          <p id="scene-error-msg">WebGL is unavailable. Use a browser with hardware acceleration enabled.</p>
+          <div class="error-details" id="scene-error-details" style="display:none; font-size:0.75rem; color:#8fa5bd; margin-top:0.75rem; text-align:left; background:rgba(0,0,0,0.3); padding:0.6rem; border-radius:4px; max-width:480px; word-break:break-word;"></div>
+          <button class="btn btn-primary" id="btn-force-fallback" style="margin-top:1rem; display:none;">Switch to 2D Fallback View</button>
+        </div>
+      </div>
+    </section>
+    <aside class="simulation-sidebar">
+      <div class="sim-panel">
+        <div class="panel-heading"><span>Fleet status</span><span id="fleet-count">0 / 10</span></div>
+        <div class="warehouse-meta" style="font-size:0.65rem; color:var(--text-muted); margin-bottom:0.6rem; display:flex; justify-content:space-between;">
+          <span>Grid: <b>12 × 16</b> cells</span>
+          <span>Robots: <b>10 active</b></span>
+        </div>
+        <div class="fleet-list" id="fleet-list"></div>
+      </div>
+      <div class="sim-panel">
+        <div class="panel-heading"><span>Performance</span><span class="live-dot">Live</span></div>
+        <div class="metric-grid">
+          <div><b id="sim-completed">0</b><small>Completed</small></div>
+          <div><b id="sim-pending">0</b><small>Pending</small></div>
+          <div><b id="sim-efficiency">0%</b><small>Efficiency</small></div>
+          <div><b id="sim-utilization">0%</b><small>Utilization</small></div>
+          <div><b id="sim-cycle">0</b><small>Avg cycle</small></div>
+          <div><b id="sim-reservations">0</b><small>Reserved cells</small></div>
+        </div>
+      </div>
+      <div class="sim-panel selected-robot" id="selected-robot">
+        <div class="panel-heading">Robot details</div><p>Click any robot in the 3D scene or fleet list.</p>
+      </div>
+      <div class="sim-panel selected-rack" id="selected-rack">
+        <div class="panel-heading">Storage Location</div><p>Click any storage rack in the 3D scene to inspect.</p>
+      </div>
+      <div class="sim-panel event-panel"><div class="panel-heading">Event log</div><div id="sim-events"></div></div>
+    </aside>
+  </div>
+</main>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="{{ url_for('static', filename='js/simulation3d.js') }}"></script>
+</body>
+</html>
