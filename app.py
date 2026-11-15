@@ -10,6 +10,8 @@ app.secret_key = "smart_warehouse_secret_2024"
 
 # The simulation is deliberately kept in the Flask process so the browser is
 # only a renderer. Coordinates are [row, column] throughout the API.
+
+
 class WarehouseSimulation:
     ROWS = 12
     COLS = 16
@@ -24,6 +26,11 @@ class WarehouseSimulation:
         (10, 4), (10, 5), (10, 7), (10, 8), (10, 10), (10, 11),
         (0, 4), (0, 5), (0, 8), (0, 10)
     ]
+
+    # Maximum ticks a robot waits before forcing a replan
+    WAIT_REPLAN_THRESHOLD = 6
+    # Maximum ticks in a deadlock cycle before breaking by priority sacrifice
+    DEADLOCK_BREAK_THRESHOLD = 14
 
     def __init__(self):
         self.lock = threading.RLock()
@@ -51,6 +58,7 @@ class WarehouseSimulation:
     def _robot(self, robot_id, row, col):
         return {
             "id": f"R{robot_id}", "row": row, "col": col,
+            "home": (row, col),
             "orientation": "north", "status": "idle", "carrying": False,
             "assigned_order": None, "path": [], "path_index": 0,
             "active_ticks": 0, "wait_ticks": 0,
@@ -59,8 +67,19 @@ class WarehouseSimulation:
     def _log(self, message):
         self.events.appendleft({"tick": self.tick, "message": message})
 
-    def _path(self, start, goal):
+    # ─────────────────────────────────────────────
+    # BFS Pathfinding
+    # ─────────────────────────────────────────────
+
+    def _path(self, start, goal, extra_blocked=None):
+        """BFS from start→goal avoiding shelf obstacles + optional extra_blocked cells."""
         blocked = self.obstacles
+        if extra_blocked:
+            blocked = blocked | set(extra_blocked)
+
+        # If start is in blocked (shouldn't happen), remove it so the robot can escape
+        blocked.discard(start)
+
         queue = deque([start])
         previous = {start: None}
         while queue:
@@ -91,6 +110,18 @@ class WarehouseSimulation:
                     if cell not in self.obstacles
                     and 0 <= cell[0] < self.ROWS and 0 <= cell[1] < self.COLS)
 
+    def _occupied_cells(self, exclude_id=None):
+        """Return set of (row, col) for every robot except the excluded one."""
+        return {
+            (r["row"], r["col"])
+            for r in self.robots
+            if r["id"] != exclude_id
+        }
+
+    # ─────────────────────────────────────────────
+    # Order Assignment
+    # ─────────────────────────────────────────────
+
     def add_order(self):
         with self.lock:
             order_id = f"ORD-{self.next_order:03d}"
@@ -107,62 +138,273 @@ class WarehouseSimulation:
             return order_id
 
     def _assign_orders(self):
+        """Assign pending orders to idle robots, planning collision-aware paths."""
         for order in self.orders:
             if order["status"] != "pending":
                 continue
             available = [r for r in self.robots if r["assigned_order"] is None]
             if not available:
                 break
-            robot = min(available, key=lambda r: abs(r["row"] - order["pick"]["row"])
-                        + abs(r["col"] - order["pick"]["col"]))
-            path = self._path((robot["row"], robot["col"]),
-                              (order["pick"]["row"], order["pick"]["col"]))
+            robot = min(
+                available,
+                key=lambda r: abs(r["row"] - order["pick"]["row"])
+                              + abs(r["col"] - order["pick"]["col"])
+            )
+            # Avoid current positions of other robots when planning
+            others = self._occupied_cells(exclude_id=robot["id"])
+            path = self._path(
+                (robot["row"], robot["col"]),
+                (order["pick"]["row"], order["pick"]["col"]),
+                extra_blocked=others
+            )
+            if not path:
+                # Fallback: plan without extra blocked (might still work later)
+                path = self._path(
+                    (robot["row"], robot["col"]),
+                    (order["pick"]["row"], order["pick"]["col"])
+                )
             if not path:
                 continue
             robot["assigned_order"] = order["id"]
             robot["path"] = path[1:]
             robot["path_index"] = 0
             robot["status"] = "moving"
+            robot["wait_ticks"] = 0
             order["status"] = "to_pick"
             order["robot_id"] = robot["id"]
             self._log(f"{order['id']} assigned to {robot['id']}")
 
+    # ─────────────────────────────────────────────
+    # Coordinated Multi-Robot Tick (Collision-Free)
+    # ─────────────────────────────────────────────
+
     def _advance_one(self):
+        """
+        Centralized movement coordinator.  All robot move proposals are built
+        simultaneously, conflict-checked, and applied atomically so that:
+          • No two robots ever share the same cell on the same tick.
+          • No head-on edge-swap (A: X→Y while B: Y→X) is allowed.
+          • Waiting robots increment wait_ticks and replan when stuck too long.
+          • Deadlocks are detected and broken by priority.
+        """
         self.tick += 1
         self._assign_orders()
+
+        # ── 1. Build current occupation map  ──────────────────────────────────
+        # occupied: (row,col) → robot_id  (snapshot before any movement)
+        occupied = {(r["row"], r["col"]): r["id"] for r in self.robots}
+
+        # ── 2. Build move proposals  ──────────────────────────────────────────
+        # proposals: robot_id → (from_cell, to_cell) | None (stationary/waiting)
+        proposals = {}
         for robot in self.robots:
-            if robot["assigned_order"] is None:
+            if robot["path_index"] >= len(robot["path"]):
+                proposals[robot["id"]] = None
                 continue
-            robot["active_ticks"] += 1
-            order = next(o for o in self.orders
-                         if o["id"] == robot["assigned_order"])
-            if robot["path_index"] < len(robot["path"]):
-                old = (robot["row"], robot["col"])
-                target = robot["path"][robot["path_index"]]
-                robot["row"], robot["col"] = target["row"], target["col"]
-                robot["path_index"] += 1
-                if target["row"] != old[0]:
-                    robot["orientation"] = "south" if target["row"] > old[0] else "north"
-                elif target["col"] != old[1]:
-                    robot["orientation"] = "east" if target["col"] > old[1] else "west"
-                continue
-            if order["status"] == "to_pick":
-                order["status"] = "to_station"
-                robot["carrying"] = True
-                robot["status"] = "carrying"
-                robot["path"] = self._path((robot["row"], robot["col"]),
-                                            (self.STATION["row"], self.STATION["col"]))[1:]
-                robot["path_index"] = 0
-                self._log(f"{robot['id']} picked {order['id']}")
+            target = robot["path"][robot["path_index"]]
+            proposals[robot["id"]] = (
+                (robot["row"], robot["col"]),
+                (target["row"], target["col"])
+            )
+
+        # ── 3. Iterative conflict resolution  ────────────────────────────────────
+        #
+        # Algorithm: "iterative elimination"
+        # 1. Start: every robot with a path proposes its next cell as intended move.
+        # 2. Mark all stationary robots as BLOCKED (they don't move).
+        # 3. Iteratively cancel moves that conflict until no changes occur:
+        #    a. If two robots propose the SAME to_cell: lower priority one waits.
+        #    b. If robot A proposes X→Y and robot B proposes Y→X (edge swap): lower priority waits.
+        #    c. If a robot's to_cell is currently occupied by a robot that is
+        #       NOT approved to leave (i.e., still staying): block the mover.
+        # 4. Apply approved moves atomically.
+        #
+        # This converges because each iteration only removes moves, never adds them.
+
+        # moving_ids: robots that currently intend to move
+        moving_ids = {rid for rid, p in proposals.items() if p is not None}
+
+        # Priority lookup: lower tuple = higher priority
+        # Longest-waiting robot goes first (-wait_ticks); tie-break by robot ID number
+        priority = {r["id"]: (-r.get("wait_ticks", 0), int(r["id"][1:]))
+                    for r in self.robots}
+
+        # Iterative elimination loop
+        changed = True
+        while changed:
+            changed = False
+
+            # Collect intended moves for all currently-moving robots
+            intending = {rid: proposals[rid] for rid in moving_ids}
+
+            # (a) Cell-claim conflicts: two movers targeting same to_cell
+            target_to_movers: dict = {}
+            for rid, (fc, tc) in intending.items():
+                target_to_movers.setdefault(tc, []).append(rid)
+
+            for tc, rids in target_to_movers.items():
+                if len(rids) > 1:
+                    # Keep highest-priority mover, cancel others
+                    rids_sorted = sorted(rids, key=lambda r: priority[r])
+                    for loser in rids_sorted[1:]:
+                        moving_ids.discard(loser)
+                        changed = True
+
+            # (b) Edge swap conflicts
+            intending = {rid: proposals[rid] for rid in moving_ids}
+            edge_set = {(fc, tc): rid for rid, (fc, tc) in intending.items()}
+            for rid, (fc, tc) in list(intending.items()):
+                reverse = (tc, fc)
+                if reverse in edge_set:
+                    other = edge_set[reverse]
+                    # Both robots want to swap — lower priority one waits
+                    if priority[rid] > priority[other]:
+                        moving_ids.discard(rid)
+                        changed = True
+
+            # (c) Target cell occupied by a robot NOT moving away
+            intending = {rid: proposals[rid] for rid in moving_ids}
+            for rid, (fc, tc) in list(intending.items()):
+                if rid not in moving_ids:
+                    continue
+                if tc in occupied:
+                    occupant_id = occupied[tc]
+                    if occupant_id not in moving_ids:
+                        # Occupant is staying → cannot move in
+                        moving_ids.discard(rid)
+                        changed = True
+
+        # Build final approved/claimed maps
+        approved = {}
+        for robot in self.robots:
+            rid = robot["id"]
+            if rid in moving_ids and proposals[rid] is not None:
+                approved[rid] = proposals[rid][1]  # to_cell
+                robot["wait_ticks"] = 0
             else:
-                order["status"] = "completed"
-                order["completed_tick"] = self.tick
+                approved[rid] = None
+                if proposals[rid] is not None:
+                    # Robot wanted to move but was blocked
+                    robot["wait_ticks"] = robot.get("wait_ticks", 0) + 1
+
+        # ── 5. Apply approved moves & order state transitions  ────────────────
+        for robot in self.robots:
+            rid = robot["id"]
+            to_cell = approved.get(rid)
+
+            if to_cell is not None:
+                old = (robot["row"], robot["col"])
+                robot["row"], robot["col"] = to_cell
+                robot["path_index"] += 1
+                # Update orientation facing
+                if to_cell[0] != old[0]:
+                    robot["orientation"] = "south" if to_cell[0] > old[0] else "north"
+                elif to_cell[1] != old[1]:
+                    robot["orientation"] = "east" if to_cell[1] > old[1] else "west"
+
+            # If returning or unassigned robot
+            if robot["assigned_order"] is None:
+                if robot["path_index"] >= len(robot["path"]):
+                    robot["status"] = "idle"
+                    robot["path"] = []
+                    robot["path_index"] = 0
+                continue
+
+            robot["active_ticks"] += 1
+            order = next(
+                (o for o in self.orders if o["id"] == robot["assigned_order"]),
+                None
+            )
+            if order is None:
                 robot["assigned_order"] = None
-                robot["carrying"] = False
-                robot["status"] = "idle"
-                robot["path"] = []
+                continue
+
+            # Check if path fully traversed → handle order state machine
+            if robot["path_index"] >= len(robot["path"]):
+                if order["status"] == "to_pick":
+                    order["status"] = "to_station"
+                    robot["carrying"] = True
+                    robot["status"] = "carrying"
+                    # Plan path to station, avoiding other robots
+                    others = self._occupied_cells(exclude_id=rid)
+                    path = self._path(
+                        (robot["row"], robot["col"]),
+                        (self.STATION["row"], self.STATION["col"]),
+                        extra_blocked=others
+                    )
+                    if not path:
+                        path = self._path(
+                            (robot["row"], robot["col"]),
+                            (self.STATION["row"], self.STATION["col"])
+                        )
+                    robot["path"] = path[1:] if path else []
+                    robot["path_index"] = 0
+                    robot["wait_ticks"] = 0
+                    self._log(f"{robot['id']} picked {order['id']}")
+
+                elif order["status"] == "to_station":
+                    order["status"] = "completed"
+                    order["completed_tick"] = self.tick
+                    robot["assigned_order"] = None
+                    robot["carrying"] = False
+                    self._log(f"{order['id']} delivered by {robot['id']}")
+
+                    # Return to home to vacate the station cell
+                    home = robot.get("home", (robot["row"], robot["col"]))
+                    if home != (robot["row"], robot["col"]):
+                        others = self._occupied_cells(exclude_id=rid)
+                        path = self._path(
+                            (robot["row"], robot["col"]),
+                            home,
+                            extra_blocked=others
+                        )
+                        if not path:
+                            path = self._path((robot["row"], robot["col"]), home)
+                        if path and len(path) > 1:
+                            robot["path"] = path[1:]
+                            robot["path_index"] = 0
+                            robot["status"] = "returning"
+                            robot["wait_ticks"] = 0
+                        else:
+                            robot["status"] = "idle"
+                            robot["path"] = []
+                            robot["path_index"] = 0
+                    else:
+                        robot["status"] = "idle"
+                        robot["path"] = []
+                        robot["path_index"] = 0
+
+        # ── 6. Deadlock / prolonged-wait replan  ─────────────────────────────
+        for robot in self.robots:
+            wt = robot.get("wait_ticks", 0)
+            if wt < self.WAIT_REPLAN_THRESHOLD:
+                continue
+            if robot["path_index"] >= len(robot["path"]):
+                continue  # no active path, nothing to replan
+
+            goal_step = robot["path"][-1]
+            goal = (goal_step["row"], goal_step["col"])
+            others = self._occupied_cells(exclude_id=robot["id"])
+
+            new_path = self._path(
+                (robot["row"], robot["col"]), goal, extra_blocked=others
+            )
+            if new_path and len(new_path) > 1:
+                robot["path"] = new_path[1:]
                 robot["path_index"] = 0
-                self._log(f"{order['id']} delivered by {robot['id']}")
+                robot["wait_ticks"] = 0
+                self._log(f"{robot['id']} replanned (waited {wt} ticks)")
+            elif wt >= self.DEADLOCK_BREAK_THRESHOLD:
+                # Hard deadlock: try planning without any extra blocked
+                new_path = self._path(
+                    (robot["row"], robot["col"]), goal
+                )
+                if new_path and len(new_path) > 1:
+                    robot["path"] = new_path[1:]
+                    robot["path_index"] = 0
+                    robot["wait_ticks"] = 0
+                    self._log(f"{robot['id']} deadlock-break replan")
+
         self._assign_orders()
 
     def advance(self):
@@ -209,6 +451,7 @@ class WarehouseSimulation:
                 },
                 "events": list(self.events),
             }
+
 
 simulation_state = WarehouseSimulation()
 
