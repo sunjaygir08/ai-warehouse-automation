@@ -120,11 +120,11 @@ def test_warehouse_grid_redesign_and_rack_ids():
     """
     Verify:
     1. Exactly 5 robots (R1..R5).
-    2. Starting positions are in row 0 side by side beside charging.
-    3. Charging station moved to the top: (0, 1) and (0, 2).
-    4. Racks moved 1 cell up to rows 1, 4, 7 in 3 sections (cols 3-4, 7-8, 11-12).
-    5. Exactly 18 racks, all with unique sequential IDs RACK-01 to RACK-18.
-    6. Delivery/packing station remains at (10, 14).
+    2. Starting positions are in row 0 side by side beside charging: (0, 2) to (0, 6).
+    3. Charging station moved to the top-left: (0, 0) and (0, 1).
+    4. Racks arranged in 4 rows (1, 4, 7, 10) in 3 pair columns (cols 3-4, 7-8, 11-12).
+    5. Exactly 24 racks, all with unique sequential IDs RACK-01 to RACK-24.
+    6. Delivery station moved to bottom-right: (11, 15).
     """
     sim = fresh_sim()
 
@@ -132,26 +132,26 @@ def test_warehouse_grid_redesign_and_rack_ids():
     assert len(sim.robots) == 5, f"Expected exactly 5 robots, got {len(sim.robots)}"
     assert [r["id"] for r in sim.robots] == ["R1", "R2", "R3", "R4", "R5"]
 
-    # 2. Charging station at the top
-    assert sim.CHARGING == [{"row": 0, "col": 1}, {"row": 0, "col": 2}]
+    # 2. Charging station at top-left
+    assert sim.CHARGING == [{"row": 0, "col": 0}, {"row": 0, "col": 1}]
 
     # 3. 5 robots side by side beside charging station
-    assert sim.STARTS == [(0, 3), (0, 4), (0, 5), (0, 6), (0, 7)]
+    assert sim.STARTS == [(0, 2), (0, 3), (0, 4), (0, 5), (0, 6)]
     for i, r in enumerate(sim.robots):
         assert (r["row"], r["col"]) == sim.STARTS[i]
 
-    # 4. Delivery/packing station unchanged
-    assert sim.STATION == {"row": 10, "col": 14}
+    # 4. Delivery station at bottom-right
+    assert sim.STATION == {"row": 11, "col": 15}
 
-    # 5. Racks arranged in rows 1, 4, 7 across cols 3, 4, 7, 8, 11, 12
-    assert len(sim.SHELVES) == 18
-    expected_ids = [f"RACK-{i+1:02d}" for i in range(18)]
+    # 5. Exactly 24 racks arranged in 4 rows
+    assert len(sim.SHELVES) == 24
+    expected_ids = [f"RACK-{i+1:02d}" for i in range(24)]
     rack_ids = [s["id"] for s in sim.SHELVES]
     assert rack_ids == expected_ids, f"Rack IDs mismatch: {rack_ids}"
 
-    # Verify rack rows are 1, 4, 7
+    # Verify rack rows are 1, 4, 7, 10
     shelf_rows = {s["row"] for s in sim.SHELVES}
-    assert shelf_rows == {1, 4, 7}, f"Expected shelf rows {{1, 4, 7}}, got {shelf_rows}"
+    assert shelf_rows == {1, 4, 7, 10}, f"Expected shelf rows {{1, 4, 7, 10}}, got {shelf_rows}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -16,21 +16,36 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 const root = document.getElementById('warehouse-scene');
 const errorEl = document.getElementById('scene-error');
 
-// Default warehouse configuration matching Flask app backend
+// Default warehouse configuration matching Flask app backend (SINGLE SOURCE OF TRUTH)
 const DEFAULT_WAREHOUSE_CONFIG = {
   grid: { rows: 12, cols: 16 },
-  station: { row: 10, col: 14 },
-  charging: [{ row: 0, col: 1 }, { row: 0, col: 2 }],
+  station: { row: 11, col: 15 },
+  charging: [{ row: 0, col: 0 }, { row: 0, col: 1 }],
   shelves: [
-    { id: 'RACK-01', row: 1, col: 3, levels: 3 }, { id: 'RACK-02', row: 1, col: 4, levels: 3 },
-    { id: 'RACK-03', row: 1, col: 7, levels: 3 }, { id: 'RACK-04', row: 1, col: 8, levels: 3 },
-    { id: 'RACK-05', row: 1, col: 11, levels: 3 }, { id: 'RACK-06', row: 1, col: 12, levels: 3 },
-    { id: 'RACK-07', row: 4, col: 3, levels: 3 }, { id: 'RACK-08', row: 4, col: 4, levels: 3 },
-    { id: 'RACK-09', row: 4, col: 7, levels: 3 }, { id: 'RACK-10', row: 4, col: 8, levels: 3 },
-    { id: 'RACK-11', row: 4, col: 11, levels: 3 }, { id: 'RACK-12', row: 4, col: 12, levels: 3 },
-    { id: 'RACK-13', row: 7, col: 3, levels: 3 }, { id: 'RACK-14', row: 7, col: 4, levels: 3 },
-    { id: 'RACK-15', row: 7, col: 7, levels: 3 }, { id: 'RACK-16', row: 7, col: 8, levels: 3 },
-    { id: 'RACK-17', row: 7, col: 11, levels: 3 }, { id: 'RACK-18', row: 7, col: 12, levels: 3 }
+    { id: 'RACK-01', row: 1, col: 3,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-02', row: 1, col: 4,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-03', row: 1, col: 7,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-04', row: 1, col: 8,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-05', row: 1, col: 11, levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-06', row: 1, col: 12, levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-07', row: 4, col: 3,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-08', row: 4, col: 4,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-09', row: 4, col: 7,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-10', row: 4, col: 8,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-11', row: 4, col: 11, levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-12', row: 4, col: 12, levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-13', row: 7, col: 3,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-14', row: 7, col: 4,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-15', row: 7, col: 7,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-16', row: 7, col: 8,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-17', row: 7, col: 11, levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-18', row: 7, col: 12, levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-19', row: 10, col: 3,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-20', row: 10, col: 4,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-21', row: 10, col: 7,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-22', row: 10, col: 8,  levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-23', row: 10, col: 11, levels: 3, status: 'AVAILABLE' },
+    { id: 'RACK-24', row: 10, col: 12, levels: 3, status: 'AVAILABLE' },
   ]
 };
 
@@ -50,6 +65,11 @@ let isAppStarted = false;
 // key: robotId -> { group, currentPos, targetPos, currentRotY, targetRotY }
 const robotEntities = new Map();
 const rackMeshes = [];
+
+// Rack highlighting state
+let selectedRackId = null;
+let destinationRackHighlights = new Map(); // robotId -> rackId
+const rackOutlines = new Map(); // rackId -> outline mesh
 
 // Warehouse grid constants
 const CELL_SIZE = 2.2; // meters per grid cell
@@ -311,6 +331,32 @@ function getSafeViewportDimensions() {
   return { width, height, aspect: width / height };
 }
 
+/**
+ * Calculates optimal camera position so the warehouse occupies 90-95%
+ * of viewport without cropping any boundaries.
+ */
+function getWarehouseFraming(isTopView = false) {
+  const rows = state?.grid?.rows || DEFAULT_WAREHOUSE_CONFIG.grid.rows;
+  const cols = state?.grid?.cols || DEFAULT_WAREHOUSE_CONFIG.grid.cols;
+  const width = cols * CELL_SIZE;
+  const depth = rows * CELL_SIZE;
+  const { aspect } = getSafeViewportDimensions();
+
+  if (isTopView) {
+    const fov = 42;
+    const vFovRad = (fov * Math.PI) / 180;
+    const hFovRad = 2 * Math.atan(Math.tan(vFovRad / 2) * aspect);
+    const distForDepth = (depth * 1.08) / (2 * Math.tan(vFovRad / 2));
+    const distForWidth = (width * 1.08) / (2 * Math.tan(hFovRad / 2));
+    const height = Math.max(distForDepth, distForWidth);
+    return new THREE.Vector3(0, height, 0.001);
+  } else {
+    const maxDim = Math.max(width, depth);
+    const radius = maxDim * 0.95;
+    return new THREE.Vector3(radius * 0.65, radius * 0.85, radius * 0.75);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Scene & Renderer Setup
 // ─────────────────────────────────────────────────────────────────────────────
@@ -390,11 +436,12 @@ function initThreeScene() {
 
   scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0a131f);
-  scene.fog = new THREE.FogExp2(0x0a131f, 0.012);
+  scene.fog = new THREE.FogExp2(0x0a131f, 0.003);
 
-  // Camera setup - Isometric perspective matching reference photo
-  camera = new THREE.PerspectiveCamera(38, aspect, 0.5, 200);
-  camera.position.set(22, 25, 26);
+  // Camera setup - dynamically calculated to occupy 90-95% of viewport
+  camera = new THREE.PerspectiveCamera(42, aspect, 0.5, 300);
+  const initialCamPos = getWarehouseFraming(false);
+  camera.position.copy(initialCamPos);
 
   // OrbitControls
   controls = new OrbitControls(camera, renderer.domElement);
@@ -500,6 +547,7 @@ function buildWarehouseEnvironment() {
   rackGroup.clear();
   stationGroup.clear();
   rackMeshes.length = 0;
+  rackOutlines.clear();
 
   // 1. Concrete Warehouse Floor
   const floorTex = createConcreteTexture();
@@ -754,13 +802,31 @@ function buildStorageRacks() {
     });
 
     const rackId = shelf.id || `RACK-${String(sIdx + 1).padStart(2, '0')}`;
+    const rackStatus = shelf.status || 'AVAILABLE';
     rack.userData = {
       isRack: true,
       row: shelf.row,
       col: shelf.col,
       levels: shelf.levels || 3,
-      id: rackId
+      id: rackId,
+      status: rackStatus
     };
+
+    // Rack selection outline box (hidden by default)
+    const outlineMat = new THREE.MeshBasicMaterial({
+      color: 0x00ffff,
+      wireframe: true,
+      transparent: true,
+      opacity: 0.0
+    });
+    const outlineMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(rackWidth + 0.15, rackHeight + 0.3, rackDepth + 0.15),
+      outlineMat.clone()
+    );
+    outlineMesh.position.set(0, (rackHeight + 0.3) / 2, 0);
+    outlineMesh.userData = { isOutline: true };
+    rack.add(outlineMesh);
+    rackOutlines.set(rackId, outlineMesh);
 
     // 3D floating identification label badge above the top shelf tier
     const labelSprite = createRackLabelSprite(rackId);
@@ -1200,6 +1266,58 @@ function applySimulationState(nextState) {
     });
   }
 
+  // Update rack statuses and visual highlights
+  if (state.shelves && rackOutlines.size > 0) {
+    destinationRackHighlights.clear();
+    if (state.robots) {
+      state.robots.forEach(r => {
+        if (r.destination_rack) {
+          destinationRackHighlights.set(r.id, r.destination_rack);
+        }
+      });
+    }
+
+    const activeDestRacks = new Set(destinationRackHighlights.values());
+
+    rackOutlines.forEach((outlineMesh, rackId) => {
+      const liveShelf = state.shelves?.find(s => s.id === rackId);
+      const isSelected = selectedRackId === rackId;
+      const isDestination = activeDestRacks.has(rackId);
+
+      let opacity = 0.0;
+      let color = 0x00ffff;
+
+      if (isSelected) {
+        opacity = 0.9;
+        color = 0x00ffff; // Cyan glow for user selected rack
+      } else if (isDestination) {
+        opacity = 0.8;
+        color = 0xff8800; // Orange for active robot destination
+      } else if (liveShelf?.status === 'RESERVED') {
+        opacity = 0.45;
+        color = 0xffcc00; // Yellow for reserved
+      } else if (liveShelf?.status === 'OCCUPIED') {
+        opacity = 0.35;
+        color = 0xff4400; // Red-orange for occupied
+      } else if (liveShelf?.status === 'UNAVAILABLE') {
+        opacity = 0.5;
+        color = 0xff0000; // Red for unavailable
+      }
+
+      outlineMesh.material.color.setHex(color);
+      outlineMesh.material.opacity = opacity;
+      outlineMesh.visible = opacity > 0;
+    });
+  }
+
+  // Live update selected rack panel
+  if (selectedRackId && state.shelves) {
+    const liveShelf = state.shelves.find(s => s.id === selectedRackId);
+    if (liveShelf) {
+      showRackDetails({ ...liveShelf, isRack: true });
+    }
+  }
+
   if (selectedRobotId) {
     const selEntity = robotEntities.get(selectedRobotId);
     if (selEntity) {
@@ -1250,14 +1368,18 @@ function renderSidebarPanels() {
 
   const fleetListEl = document.getElementById('fleet-list');
   if (fleetListEl && state.robots) {
-    fleetListEl.innerHTML = state.robots.map(r => `
+    fleetListEl.innerHTML = state.robots.map(r => {
+      const bat = typeof r.battery === 'number' ? r.battery : 100;
+      const batColor = bat > 50 ? '#00ff9d' : bat > 20 ? '#f5b300' : '#ff4444';
+      return `
       <div class="fleet-row ${selectedRobotId === r.id ? 'selected' : ''}" data-robot="${r.id}">
         <span class="state-dot ${r.carrying ? 'carrying' : r.status !== 'idle' ? '' : 'waiting'}"></span>
         <b class="fleet-id">${r.id}</b>
         <span class="fleet-state">${r.status.toUpperCase()} ${r.carrying ? '· 📦 CARGO' : ''}</span>
+        <small style="color:${batColor}; font-size:0.6rem;">⚡${bat.toFixed(0)}%</small>
         <small style="color:var(--text-muted); font-size:0.6rem;">(${r.row}, ${r.col})</small>
       </div>
-    `).join('');
+    `}).join('');
 
     fleetListEl.querySelectorAll('.fleet-row').forEach(rowEl => {
       rowEl.onclick = () => selectRobotById(rowEl.dataset.robot);
@@ -1286,6 +1408,19 @@ function showRobotDetails(robot) {
   }
 
   const remaining = robot.path ? Math.max(0, robot.path.length - robot.path_index) : 0;
+  const battery = typeof robot.battery === 'number' ? robot.battery : 100;
+  const batteryColor = battery > 50 ? '#00ff9d' : battery > 20 ? '#f5b300' : '#ff4444';
+  const batteryBar = `<div style="display:inline-block;width:60px;height:8px;background:#1a2a3a;border-radius:4px;vertical-align:middle;margin-left:4px;">
+    <div style="width:${battery}%;height:100%;background:${batteryColor};border-radius:4px;"></div>
+  </div>`;
+
+  const destRack = robot.destination_rack
+    ? `<strong>Dest. Rack:</strong> <span style="color:#f5b300;">${robot.destination_rack}</span><br>`
+    : '';
+  const chargingInfo = robot.charging
+    ? `<strong>Charging:</strong> <span style="color:#00ff9d;">YES ⚡</span><br>`
+    : (robot.status === 'charging_transit' ? `<strong>Charging:</strong> <span style="color:#f5b300;">En Route</span><br>` : '');
+
   panel.innerHTML = `
     <div class="panel-heading">
       <span>Robot details</span>
@@ -1294,7 +1429,10 @@ function showRobotDetails(robot) {
     <div class="robot-detail">
       <strong>Status:</strong> ${robot.status.toUpperCase()}<br>
       <strong>Grid Pos:</strong> Row ${robot.row}, Col ${robot.col}<br>
+      <strong>Battery:</strong> <span style="color:${batteryColor};">${battery.toFixed(0)}%</span>${batteryBar}<br>
+      ${chargingInfo}
       <strong>Order:</strong> ${robot.assigned_order || 'None (Idle)'}<br>
+      ${destRack}
       <strong>Cargo:</strong> ${robot.carrying ? 'Yes (Box Stack Loaded)' : 'Empty / Available'}<br>
       <strong>Remaining Path:</strong> ${remaining} waypoints<br>
       <strong>Heading:</strong> ${robot.orientation.toUpperCase()}
@@ -1310,6 +1448,21 @@ function showRackDetails(rackData) {
     return;
   }
 
+  // Get live status from backend state
+  const liveShelf = state?.shelves?.find(s => s.id === rackData.id);
+  const liveStatus = liveShelf?.status || rackData.status || 'AVAILABLE';
+
+  // Find assigned robot if any
+  const assignedRobot = state?.robots?.find(r => r.destination_rack === rackData.id);
+
+  const statusColors = {
+    'AVAILABLE': '#00ff9d',
+    'OCCUPIED': '#ff6600',
+    'RESERVED': '#f5b300',
+    'UNAVAILABLE': '#ff4444'
+  };
+  const statusColor = statusColors[liveStatus] || '#00d9ff';
+
   panel.innerHTML = `
     <div class="panel-heading">
       <span>Storage Location</span>
@@ -1318,9 +1471,10 @@ function showRackDetails(rackData) {
     <div class="rack-detail">
       <strong>Rack ID:</strong> <span style="color:#00d9ff; font-weight:bold;">${rackData.id}</span><br>
       <strong>Grid Position:</strong> Row ${rackData.row}, Col ${rackData.col}<br>
-      <strong>Levels:</strong> ${rackData.levels} Storage Tiers<br>
+      <strong>Levels:</strong> ${rackData.levels || 3} Storage Tiers<br>
       <strong>Capacity:</strong> 12 Pallet Boxes<br>
-      <strong>Status:</strong> Accessible from surrounding aisles<br>
+      <strong>Status:</strong> <span style="color:${statusColor}; font-weight:bold;">${liveStatus}</span><br>
+      ${assignedRobot ? `<strong>Assigned Robot:</strong> <span style="color:#00d9ff;">${assignedRobot.id}</span><br>` : ''}
       <strong>Obstacle:</strong> Active BFS Collision Boundary
     </div>
   `;
@@ -1367,7 +1521,10 @@ function handleSceneClick(event) {
     const rData = rackIntersects[0].object.userData;
     if (rData && rData.isRack) {
       selectedRackData = rData;
-      showRackDetails(rData);
+      selectedRackId = rData.id;
+      const liveShelf = state?.shelves?.find(s => s.id === rData.id);
+      showRackDetails(liveShelf ? { ...liveShelf, isRack: true } : rData);
+      if (state) applySimulationState(state);
       return;
     }
   }
@@ -1379,14 +1536,16 @@ function handleSceneClick(event) {
 
 function resetIsometricCamera() {
   if (!camera || !controls) return;
-  camera.position.set(22, 25, 26);
+  const pos = getWarehouseFraming(false);
+  camera.position.copy(pos);
   controls.target.set(0, 0, 0);
   controls.update();
 }
 
 function setTopDownCamera() {
   if (!camera || !controls) return;
-  camera.position.set(0, 42, 0.001);
+  const pos = getWarehouseFraming(true);
+  camera.position.copy(pos);
   controls.target.set(0, 0, 0);
   controls.update();
 }
@@ -1409,6 +1568,15 @@ function renderFrame() {
     const t = Date.now() * 0.004;
     const scale = 1.0 + Math.sin(t) * 0.06;
     selectionRing.scale.set(scale, scale, 1);
+  }
+
+  // Pulse effect on selected rack outline
+  if (selectedRackId) {
+    const selOutline = rackOutlines.get(selectedRackId);
+    if (selOutline && selOutline.visible) {
+      const t = Date.now() * 0.005;
+      selOutline.material.opacity = 0.7 + Math.sin(t) * 0.25;
+    }
   }
 
   controls?.update();
@@ -1546,10 +1714,18 @@ document.getElementById('sim-pause')?.addEventListener('click', () => {
 document.getElementById('sim-reset')?.addEventListener('click', async () => {
   selectedRobotId = null;
   selectedRackData = null;
+  selectedRackId = null;
   if (selectionRing) selectionRing.visible = false;
   robotEntities.forEach(e => robotGroup.remove(e.group));
   robotEntities.clear();
+  destinationRackHighlights.clear();
+  rackOutlines.forEach(outline => {
+    outline.material.opacity = 0.0;
+    outline.visible = false;
+  });
   await sendCommand('/api/simulation/reset', { method: 'POST' });
+  showRobotDetails(null);
+  showRackDetails(null);
 });
 
 document.getElementById('sim-order')?.addEventListener('click', () => {
