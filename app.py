@@ -16,15 +16,17 @@ class WarehouseSimulation:
     ROWS = 12
     COLS = 16
     STATION = {"row": 10, "col": 14}
-    CHARGING = [{"row": 10, "col": 1}, {"row": 10, "col": 2}]
+    CHARGING = [{"row": 0, "col": 1}, {"row": 0, "col": 2}]
     SHELVES = [
-        {"row": row, "col": col, "levels": 3}
-        for row in (2, 5, 8)
-        for col in (3, 4, 7, 8, 11, 12)
+        {"id": f"RACK-{i+1:02d}", "row": row, "col": col, "levels": 3}
+        for i, (row, col) in enumerate([
+            (r, c)
+            for r in (1, 4, 7)
+            for c in (3, 4, 7, 8, 11, 12)
+        ])
     ]
     STARTS = [
-        (10, 4), (10, 5), (10, 7), (10, 8), (10, 10), (10, 11),
-        (0, 4), (0, 5), (0, 8), (0, 10)
+        (0, 3), (0, 4), (0, 5), (0, 6), (0, 7)
     ]
 
     # Maximum ticks a robot waits before forcing a replan
@@ -59,7 +61,7 @@ class WarehouseSimulation:
         return {
             "id": f"R{robot_id}", "row": row, "col": col,
             "home": (row, col),
-            "orientation": "north", "status": "idle", "carrying": False,
+            "orientation": "south", "status": "idle", "carrying": False,
             "assigned_order": None, "path": [], "path_index": 0,
             "active_ticks": 0, "wait_ticks": 0,
         }

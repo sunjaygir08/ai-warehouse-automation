@@ -20,17 +20,17 @@ const errorEl = document.getElementById('scene-error');
 const DEFAULT_WAREHOUSE_CONFIG = {
   grid: { rows: 12, cols: 16 },
   station: { row: 10, col: 14 },
-  charging: [{ row: 10, col: 1 }, { row: 10, col: 2 }],
+  charging: [{ row: 0, col: 1 }, { row: 0, col: 2 }],
   shelves: [
-    { row: 2, col: 3, levels: 3 }, { row: 2, col: 4, levels: 3 },
-    { row: 2, col: 7, levels: 3 }, { row: 2, col: 8, levels: 3 },
-    { row: 2, col: 11, levels: 3 }, { row: 2, col: 12, levels: 3 },
-    { row: 5, col: 3, levels: 3 }, { row: 5, col: 4, levels: 3 },
-    { row: 5, col: 7, levels: 3 }, { row: 5, col: 8, levels: 3 },
-    { row: 5, col: 11, levels: 3 }, { row: 5, col: 12, levels: 3 },
-    { row: 8, col: 3, levels: 3 }, { row: 8, col: 4, levels: 3 },
-    { row: 8, col: 7, levels: 3 }, { row: 8, col: 8, levels: 3 },
-    { row: 8, col: 11, levels: 3 }, { row: 8, col: 12, levels: 3 }
+    { id: 'RACK-01', row: 1, col: 3, levels: 3 }, { id: 'RACK-02', row: 1, col: 4, levels: 3 },
+    { id: 'RACK-03', row: 1, col: 7, levels: 3 }, { id: 'RACK-04', row: 1, col: 8, levels: 3 },
+    { id: 'RACK-05', row: 1, col: 11, levels: 3 }, { id: 'RACK-06', row: 1, col: 12, levels: 3 },
+    { id: 'RACK-07', row: 4, col: 3, levels: 3 }, { id: 'RACK-08', row: 4, col: 4, levels: 3 },
+    { id: 'RACK-09', row: 4, col: 7, levels: 3 }, { id: 'RACK-10', row: 4, col: 8, levels: 3 },
+    { id: 'RACK-11', row: 4, col: 11, levels: 3 }, { id: 'RACK-12', row: 4, col: 12, levels: 3 },
+    { id: 'RACK-13', row: 7, col: 3, levels: 3 }, { id: 'RACK-14', row: 7, col: 4, levels: 3 },
+    { id: 'RACK-15', row: 7, col: 7, levels: 3 }, { id: 'RACK-16', row: 7, col: 8, levels: 3 },
+    { id: 'RACK-17', row: 7, col: 11, levels: 3 }, { id: 'RACK-18', row: 7, col: 12, levels: 3 }
   ]
 };
 
@@ -599,6 +599,57 @@ function buildNavigationLanes(rows, cols) {
  * - Industrial Orange load beams (#eb5f12) supporting 3 shelf levels
  * - Pallets and varied brown cardboard boxes stacked realistically
  */
+/**
+ * Creates a floating high-contrast billboard label sprite for rack identification
+ */
+function createRackLabelSprite(text) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 72;
+  const ctx = canvas.getContext('2d');
+
+  // Badge background with dark industrial styling
+  ctx.fillStyle = 'rgba(8, 20, 36, 0.94)';
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(4, 4, 248, 64, 12);
+  } else {
+    ctx.rect(4, 4, 248, 64);
+  }
+  ctx.fill();
+
+  // Cyan border
+  ctx.strokeStyle = '#00d9ff';
+  ctx.lineWidth = 3.5;
+  ctx.stroke();
+
+  // Orange top accent
+  ctx.strokeStyle = '#ff8c35';
+  ctx.lineWidth = 3.5;
+  ctx.beginPath();
+  ctx.moveTo(35, 6);
+  ctx.lineTo(221, 6);
+  ctx.stroke();
+
+  // Sharp text label
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 30px "JetBrains Mono", Consolas, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, 128, 40);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  const spriteMat = new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false
+  });
+  const sprite = new THREE.Sprite(spriteMat);
+  sprite.scale.set(1.45, 0.42, 1);
+  return sprite;
+}
+
 function buildStorageRacks() {
   const blueFrameMat = getSharedMaterial('rackBlue', { color: 0x165899, roughness: 0.45, metalness: 0.55 });
   const orangeBeamMat = getSharedMaterial('rackOrange', { color: 0xeb5f12, roughness: 0.4, metalness: 0.45 });
@@ -702,19 +753,27 @@ function buildStorageRacks() {
       });
     });
 
+    const rackId = shelf.id || `RACK-${String(sIdx + 1).padStart(2, '0')}`;
     rack.userData = {
       isRack: true,
       row: shelf.row,
       col: shelf.col,
       levels: shelf.levels || 3,
-      id: `RACK-${shelf.row}-${shelf.col}`
+      id: rackId
     };
 
+    // 3D floating identification label badge above the top shelf tier
+    const labelSprite = createRackLabelSprite(rackId);
+    labelSprite.position.set(0, rackHeight + 0.38, 0);
+    labelSprite.userData = rack.userData;
+    rack.add(labelSprite);
+    rackMeshes.push(labelSprite);
+
     const hitBox = new THREE.Mesh(
-      new THREE.BoxGeometry(rackWidth, rackHeight, rackDepth),
+      new THREE.BoxGeometry(rackWidth, rackHeight + 0.6, rackDepth),
       new THREE.MeshBasicMaterial({ visible: false })
     );
-    hitBox.position.set(0, rackHeight / 2, 0);
+    hitBox.position.set(0, (rackHeight + 0.6) / 2, 0);
     hitBox.userData = rack.userData;
     rack.add(hitBox);
 
@@ -1103,6 +1162,15 @@ function applySimulationState(nextState) {
   };
 
   if (state.robots) {
+    // Purge any stale robot entities from previous states
+    const currentRobotIds = new Set(state.robots.map(r => r.id));
+    for (const [id, entity] of robotEntities.entries()) {
+      if (!currentRobotIds.has(id)) {
+        robotGroup.remove(entity.group);
+        robotEntities.delete(id);
+      }
+    }
+
     state.robots.forEach(r => {
       let entity = robotEntities.get(r.id);
       if (!entity) {
@@ -1153,7 +1221,7 @@ function renderSidebarPanels() {
   if (!state) return;
 
   const activeCount = state.robots ? state.robots.filter(r => r.status !== 'idle').length : 0;
-  const totalCount = state.robots ? state.robots.length : 10;
+  const totalCount = state.robots ? state.robots.length : 5;
   const fleetCountEl = document.getElementById('fleet-count');
   if (fleetCountEl) fleetCountEl.textContent = `${activeCount} / ${totalCount}`;
 
@@ -1248,7 +1316,8 @@ function showRackDetails(rackData) {
       <b style="color:#ff8c35; font-size:0.8rem;">${rackData.id}</b>
     </div>
     <div class="rack-detail">
-      <strong>Position:</strong> Row ${rackData.row}, Col ${rackData.col}<br>
+      <strong>Rack ID:</strong> <span style="color:#00d9ff; font-weight:bold;">${rackData.id}</span><br>
+      <strong>Grid Position:</strong> Row ${rackData.row}, Col ${rackData.col}<br>
       <strong>Levels:</strong> ${rackData.levels} Storage Tiers<br>
       <strong>Capacity:</strong> 12 Pallet Boxes<br>
       <strong>Status:</strong> Accessible from surrounding aisles<br>
@@ -1403,6 +1472,12 @@ function drawFallback2D() {
     ctx.fillRect(x + 2, y + 2, scale - 4, scale - 4);
     ctx.fillStyle = '#eb5f12';
     ctx.fillRect(x + 2, y + 2, scale - 4, 3);
+    if (s.id) {
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 8px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(s.id.replace('RACK-', 'R'), x + scale / 2, y + scale / 2 + 3);
+    }
   });
 
   if (state?.robots) {
