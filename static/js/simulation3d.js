@@ -352,7 +352,9 @@ function getWarehouseFraming(isTopView = false) {
     return new THREE.Vector3(0, height, 0.001);
   } else {
     const maxDim = Math.max(width, depth);
-    const radius = maxDim * 0.95;
+    // Responsive aspect ratio correction so no warehouse edges are cropped
+    const aspectCorrection = Math.max(1.0, 1.45 / aspect);
+    const radius = maxDim * 0.95 * aspectCorrection;
     return new THREE.Vector3(radius * 0.65, radius * 0.85, radius * 0.75);
   }
 }
@@ -1747,6 +1749,146 @@ document.getElementById('sim-grid')?.addEventListener('change', e => {
   if (gridGroup) gridGroup.visible = e.target.checked;
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Full Screen Functionality (Native Fullscreen API)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getFullscreenElement() {
+  return document.fullscreenElement ||
+         document.webkitFullscreenElement ||
+         document.mozFullScreenElement ||
+         document.msFullscreenElement ||
+         null;
+}
+
+function isFullscreenActive() {
+  return Boolean(getFullscreenElement());
+}
+
+async function toggleFullscreen() {
+  const container = document.querySelector('.simulation-shell');
+  if (!container) return;
+
+  try {
+    if (!isFullscreenActive()) {
+      if (container.requestFullscreen) {
+        await container.requestFullscreen();
+      } else if (container.webkitRequestFullscreen) {
+        await container.webkitRequestFullscreen();
+      } else if (container.mozRequestFullScreen) {
+        await container.mozRequestFullScreen();
+      } else if (container.msRequestFullscreen) {
+        await container.msRequestFullscreen();
+      } else {
+        container.classList.add('is-fullscreen');
+        handleFullscreenChange();
+      }
+    } else {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        await document.webkitExitFullscreen();
+      } else if (document.mozCancelFullScreen) {
+        await document.mozCancelFullScreen();
+      } else if (document.msExitFullscreen) {
+        await document.msExitFullscreen();
+      } else {
+        container.classList.remove('is-fullscreen');
+        handleFullscreenChange();
+      }
+    }
+  } catch (err) {
+    console.warn('[Warehouse 3D] Fullscreen toggle error:', err);
+  }
+}
+
+function handleFullscreenChange() {
+  const active = isFullscreenActive() || Boolean(document.querySelector('.simulation-shell')?.classList.contains('is-fullscreen'));
+  const fsBtn = document.getElementById('sim-fullscreen');
+  const fsIcon = document.getElementById('sim-fs-icon');
+  const fsText = document.getElementById('sim-fs-text');
+  const container = document.querySelector('.simulation-shell');
+
+  if (container) {
+    container.classList.toggle('is-fullscreen', active);
+  }
+
+  if (fsBtn) {
+    fsBtn.title = active ? 'Exit Full Screen' : 'Enter Full Screen';
+    fsBtn.setAttribute('aria-label', active ? 'Exit Full Screen' : 'Enter Full Screen');
+    if (active) {
+      fsBtn.classList.add('active');
+    } else {
+      fsBtn.classList.remove('active');
+    }
+  }
+
+  if (fsIcon) {
+    fsIcon.textContent = active ? '🗗' : '⛶';
+  }
+  if (fsText) {
+    fsText.textContent = active ? 'Exit Full Screen' : 'Full Screen';
+  }
+
+  // Recalculate camera framing and resize renderer smoothly
+  requestAnimationFrame(() => {
+    handleResize();
+    resetIsometricCamera();
+  });
+}
+
+function initFullscreenControls() {
+  const fsBtn = document.getElementById('sim-fullscreen');
+  if (fsBtn) {
+    fsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleFullscreen();
+    });
+  }
+
+  const panelsBtn = document.getElementById('sim-panels');
+  if (panelsBtn) {
+    panelsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const sidebar = document.querySelector('.simulation-sidebar');
+      if (sidebar) {
+        sidebar.classList.toggle('panels-hidden');
+        panelsBtn.classList.toggle('active', sidebar.classList.contains('panels-hidden'));
+      }
+    });
+  }
+
+  // Listen for fullscreenchange events (standard + vendor prefixes)
+  document.addEventListener('fullscreenchange', handleFullscreenChange);
+  document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+  document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+  document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+  // Keyboard shortcut: ESC backup for non-standard fullscreens
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      const container = document.querySelector('.simulation-shell');
+      if (container && container.classList.contains('is-fullscreen') && !getFullscreenElement()) {
+        container.classList.remove('is-fullscreen');
+        handleFullscreenChange();
+      }
+    }
+  });
+
+  // Stop toolbar clicks from propagating to OrbitControls canvas
+  const toolbar = document.querySelector('.simulation-toolbar');
+  if (toolbar) {
+    toolbar.addEventListener('pointerdown', (e) => e.stopPropagation());
+    toolbar.addEventListener('mousedown', (e) => e.stopPropagation());
+  }
+
+  const sidebar = document.querySelector('.simulation-sidebar');
+  if (sidebar) {
+    sidebar.addEventListener('pointerdown', (e) => e.stopPropagation());
+    sidebar.addEventListener('mousedown', (e) => e.stopPropagation());
+  }
+}
+
 // Global runtime error monitor to catch rendering failures and show error overlay
 window.addEventListener('error', (event) => {
   if (event.filename && event.filename.includes('simulation3d')) {
@@ -1770,6 +1912,9 @@ function startSimulationApp() {
       console.warn('[Warehouse 3D] WebGL scene could not be initialized.');
       return;
     }
+
+    // Initialize Full Screen Controls
+    initFullscreenControls();
 
     // Build the 3D warehouse environment immediately so the viewport is never blank
     buildWarehouseEnvironment();

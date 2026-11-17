@@ -253,6 +253,140 @@ img { max-width: 100%; }
   .event-panel { min-height:150px; }
 }
 
+/* ── Fullscreen Simulation Mode ────────────────────────── */
+.btn-fullscreen {
+  transition: all var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.btn-fullscreen.active {
+  background: rgba(0, 212, 255, 0.22);
+  border-color: var(--neon-blue);
+  color: #fff;
+  box-shadow: var(--glow);
+}
+
+.simulation-shell:fullscreen,
+.simulation-shell:-webkit-full-screen,
+.simulation-shell:-moz-full-screen,
+.simulation-shell:-ms-fullscreen,
+.simulation-shell.is-fullscreen {
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: 100vw !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: #050a12 !important;
+  overflow: hidden !important;
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 99999 !important;
+}
+
+.simulation-shell:fullscreen .simulation-topbar,
+.simulation-shell.is-fullscreen .simulation-topbar {
+  display: none !important;
+}
+
+.simulation-shell:fullscreen .simulation-layout,
+.simulation-shell.is-fullscreen .simulation-layout {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.simulation-shell:fullscreen .warehouse-viewport,
+.simulation-shell.is-fullscreen .warehouse-viewport {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 100% !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  z-index: 1 !important;
+}
+
+.simulation-shell:fullscreen #warehouse-scene,
+.simulation-shell.is-fullscreen #warehouse-scene {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.simulation-shell:fullscreen #warehouse-scene canvas,
+.simulation-shell.is-fullscreen #warehouse-scene canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* Floating Toolbar in Fullscreen */
+.simulation-shell:fullscreen .simulation-toolbar,
+.simulation-shell.is-fullscreen .simulation-toolbar {
+  position: absolute !important;
+  top: 14px !important;
+  left: 14px !important;
+  z-index: 100 !important;
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  background: rgba(8, 16, 28, 0.90) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  padding: 8px 14px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65) !important;
+  pointer-events: auto !important;
+}
+
+/* Floating Sidebar in Fullscreen */
+.simulation-shell:fullscreen .simulation-sidebar,
+.simulation-shell.is-fullscreen .simulation-sidebar {
+  position: absolute !important;
+  top: 72px !important;
+  right: 14px !important;
+  bottom: 14px !important;
+  width: 320px !important;
+  z-index: 90 !important;
+  overflow-y: auto !important;
+  background: rgba(8, 16, 28, 0.90) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: var(--radius) !important;
+  padding: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65) !important;
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.28s ease !important;
+  pointer-events: auto !important;
+}
+
+.simulation-shell:fullscreen .simulation-sidebar.panels-hidden,
+.simulation-shell.is-fullscreen .simulation-sidebar.panels-hidden {
+  transform: translateX(340px) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+.simulation-shell:fullscreen .scene-help,
+.simulation-shell.is-fullscreen .scene-help {
+  position: absolute !important;
+  bottom: 12px !important;
+  left: 14px !important;
+  z-index: 80 !important;
+  background: rgba(5, 10, 18, 0.8) !important;
+  padding: 4px 10px !important;
+  border-radius: 4px !important;
+  font-size: 0.62rem !important;
+  pointer-events: none !important;
+}
+
 .hero h1 {
   font-family   : var(--font-display);
   font-size     : clamp(2.2rem, 6vw, 4.2rem);
